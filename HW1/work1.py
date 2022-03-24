@@ -163,14 +163,117 @@ ax3.imshow(reconstruction_fbp_with_filter, cmap=plt.cm.Greys_r)
 fig.tight_layout()
 plt.show()
 
+
+
+
+
+fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(14, 14))
+
+# Generate a plot for the original
+ax1.set_title("Shepp-Logan head phantom")
+ax1.imshow(image, cmap=plt.cm.Greys_r)
+
+# Generate the sinogram
+ax2.set_title("reconstruction_fbp_no_filter")
+ax2.imshow(reconstruction_fbp_no_filter, cmap=plt.cm.Greys_r)
+
+ax3.set_title("reconstruction_fbp_with_filter")
+ax3.imshow(reconstruction_fbp_with_filter, cmap=plt.cm.Greys_r)
+
+fig.tight_layout()
+plt.show()
+
+
+
+
+error_no_filter = reconstruction_fbp_no_filter - image
+error_with_filter = reconstruction_fbp_with_filter - image
+
+MSE_error_no_filter = np.round(np.sqrt(np.mean(error_no_filter**2)),2)
+MSE_error_with_filter = np.round(np.sqrt(np.mean(error_with_filter**2)),2)
+
+error_no_filter_abs = np.abs(error_no_filter)
+error_with_filter_abs = np.abs(error_with_filter)
+
+imkwargs = dict(vmin=-0.2, vmax=0.2)
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4.5),
+                               sharex=True, sharey=True)
+ax1.set_title("Absult error reconstruction \nwith low pass filtered back projection\nMSE error rate "+str(MSE_error_with_filter))
+ax1.imshow(error_with_filter_abs)
+ax2.set_title("Absult error reconstruction \nwithout low pass filtered back projection\nMSE error rate "+str(MSE_error_no_filter))
+ax2.imshow(error_no_filter_abs)
+plt.show()
+
+
+error = reconstruction_fbp - image
+print(f'FBP rms reconstruction error: {np.sqrt(np.mean(error**2)):.3g}')
+
+imkwargs = dict(vmin=-0.2, vmax=0.2)
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4.5),
+                               sharex=True, sharey=True)
+ax1.set_title("Reconstruction\nFiltered back projection")
+ax1.imshow(reconstruction_fbp, cmap=plt.cm.Greys_r)
+ax2.set_title("Reconstruction error\nFiltered back projection")
+ax2.imshow(reconstruction_fbp - image, cmap=plt.cm.Greys_r, **imkwargs)
+plt.show()
+
+
 #______________________________________________________________________________
 # Step 4 - Apply & describe an algebraic iterative reconstruction technique (CGLS\SIRT):
     
+# import numpy as np
+# import neutompy as ntp
+
+# # set pixel size in cm
+# pixel_size  = 0.0029
+
+# # set the last angle value of the CT scan: np.pi or 2*np.pi
+# last_angle = 2*np.pi
+
+# # read dataset containg projection, dark-field, flat-field images and the projection at 180 degree
+# proj, dark, flat, proj_180 = ntp.read_dataset()
+
+# # normalize the projections to dark-field, flat-field images and neutron dose
+# norm, norm_180 = ntp.normalize_proj(proj, dark, flat, proj_180=proj_180, dose_draw=True, crop_draw=True)
+
+# # rotation axis tilt correction
+# norm = ntp.correction_COR(norm, norm[0], norm_180)
+
+# # clean up memory
+# del dark; del flat; del proj; del proj_180
+
+# # remove outliers, set the optimal radius and threshold
+# norm = ntp.remove_outliers_stack(norm, radius=1, threshold=0.018, outliers='dark', out=norm)
+# norm = ntp.remove_outliers_stack(norm, radius=3, threshold=0.018, outliers='bright', out=norm)
+
+# # perform minus-log transform
+# norm =  ntp.log_transform(norm, out=norm)
+
+# # remove stripes in sinograms
+# norm = ntp.remove_stripe_stack(norm, level=4, wname='db30', sigma=1.5, out=norm)
+
+# # define the array of the angle views in radians
+# angles = np.linspace(0, last_angle, norm.shape[0], endpoint=False)
+
+# # SIRT reconstruction with 100 iterations using GPU
+# print('> Reconstruction...')
+# rec    = ntp.reconstruct(norm, angles, 'SIRT_CUDA', parameters={"iterations":100}, pixel_size=pixel_size)
+
     
     
-    
-    
-    
+v = np.zeros((image.shape));
+C = np.zeros((image.shape[0],image.shape[0]))
+R = np.zeros((sinogram.shape[1],sinogram.shape[1]))
+W = np.zeros((sinogram.shape[1],image.shape[1]))
+np.fill_diagonal(C,1)
+np.fill_diagonal(R,1)
+np.fill_diagonal(W,1)
+W_T = W.T
+CATR = C@W_T@R
+for i in range(10):
+  v = v + CATR@(sinogram.T - W@v)
+
+cv2.imshow('', v)
     
     
     
