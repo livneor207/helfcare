@@ -1,11 +1,8 @@
-
-import os 
 import pandas as pd
 import numpy as np
-import cv2
 import matplotlib.pyplot as plt
 from skimage.data import shepp_logan_phantom
-from skimage.transform import radon, rescale
+from skimage.transform import radon, iradon, rescale
 import time
 #__________________________________________________________________________
 # Step 1: 
@@ -63,6 +60,8 @@ def generate_image_sinogram_comparation_plot(image):
 
 
 generate_image_sinogram_comparation_plot(image)
+generate_image_sinogram_comparation_plot(mask1)
+generate_image_sinogram_comparation_plot(mask2)
 
 #______________________________________________________________________________
 # Step 2: 
@@ -145,8 +144,24 @@ bla bla bla
 #______________________________________________________________________________
 # Step 3 - difference of performing back projection and filtered back projection:
     
-    
+# Generate the reconstructions
+reconstruction_fbp_no_filter = iradon(sinogram, theta=theta, filter_name=None)
+reconstruction_fbp_with_filter = iradon(sinogram, theta=theta, filter_name='ramp')
+fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(14, 14))
 
+# Generate a plot for the original
+ax1.set_title("Shepp-Logan head phantom")
+ax1.imshow(image, cmap=plt.cm.Greys_r)
+
+# Generate the sinogram
+ax2.set_title("reconstruction_fbp_no_filter")
+ax2.imshow(reconstruction_fbp_no_filter, cmap=plt.cm.Greys_r)
+
+ax3.set_title("reconstruction_fbp_with_filter")
+ax3.imshow(reconstruction_fbp_with_filter, cmap=plt.cm.Greys_r)
+
+fig.tight_layout()
+plt.show()
 
 #______________________________________________________________________________
 # Step 4 - Apply & describe an algebraic iterative reconstruction technique (CGLS\SIRT):
