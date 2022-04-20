@@ -29,7 +29,6 @@ import os
 
 from skimage.measure import label
 
-
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 # general folder path
@@ -225,6 +224,9 @@ def get_mask_by_uid(rle_encodings_df, image, uid):
             final_mask += current_mask  # Important logic
 
     # mask needs to be rotated to fit the original image
+    
+    # todo seprate mask
+    final_mask[final_mask>0] = 255 # all diceese the same
     mask = final_mask
     mask = np.rot90(mask, 3) #rotating three times 90 to the right place
     mask = np.flip(mask, axis=1)
@@ -267,18 +269,18 @@ def get_total_area_of_and_metadata_of_masks(metadata_df, images_df, rle_encoding
 
 train_metadata_df_ill = train_metadata_df[train_metadata_df['Label'] == 'Pneumothorax'].reset_index(drop=True)
 
-results = get_total_area_of_and_metadata_of_masks(
-    metadata_df=train_metadata_df_ill, 
-    images_df=train_images_df, 
-    rle_encodings_df=train_rle_encodings_df)
+# results = get_total_area_of_and_metadata_of_masks(
+#     metadata_df=train_metadata_df_ill, 
+#     images_df=train_images_df, 
+#     rle_encodings_df=train_rle_encodings_df)
 
-list_of_areas = [list_item['TotalArea'] for list_item in results] 
-plt.figure(figsize=(15, 5))
-plt.title(f'Histogram of total area of pneumathorax in pixels')
-plt.hist(list_of_areas, bins = 100)
-plt.xlabel("Area in pixels")
-plt.ylabel("Count")
-plt.show()
+# list_of_areas = [list_item['TotalArea'] for list_item in results] 
+# plt.figure(figsize=(15, 5))
+# plt.title(f'Histogram of total area of pneumathorax in pixels')
+# plt.hist(list_of_areas, bins = 100)
+# plt.xlabel("Area in pixels")
+# plt.ylabel("Count")
+# plt.show()
 
 
 
@@ -299,38 +301,44 @@ def plot_imgs(uids_list, images_df, rle_encodings_df):
         try:
             image = get_image_by_uid(images_df, uid)
             mask = get_mask_by_uid(rle_encodings_df, image, uid)
-            # blob, blob_number = label(mask, return_num=True) # to talk with roi about this part
-            rmin, cmin, rmax, cmax = get_bounding_box(mask)
+            # Create the figure
+            fig, axes = plt.subplots(1,4, figsize=(20,15))
+            blob, blob_number = label(mask, return_num=True) # to talk with roi about this par
+            axes[0].imshow(image, cmap='bone')
+            axes[1].imshow(mask, cmap='gray')
+            axes[2].imshow(image, cmap='bone')
+
+            for i_blob_idx in range(1, blob_number+1):
+                curr_blob = blob.copy()
+                curr_blob[curr_blob!= (i_blob_idx)] = 0
+                rmin, cmin, rmax, cmax = get_bounding_box(curr_blob)
+              
+            
+                
+                # Create the plot for original image +mask+ mask bounding box
+                cv2.rectangle(image, (cmin,rmin),(cmax,rmax), (255,255,0), 5)
+                
+        
+       
         except Exception as e:
-            raise e
-            print(f'could not process image with uid {uid}.\nreason: {e}')
-            continue
+                raise e
+                print(f'could not process image with uid {uid}.\nreason: {e}')
+                continue
         
-        # Create the figure
-        fig, axes = plt.subplots(1,4, figsize=(20,15))
-        
-        # Create the plot for the original image
-        axes[0].imshow(image, cmap='bone')
-        axes[0].set_title('Original Image')
+        # Finally, show image
+       
         
         # Create the plot for the Pneumathorax mask
-        axes[1].imshow(mask, cmap='gray')
         axes[1].set_title('Mask Only')
         
         # Create the plot for the original image with the mask on top of it
-        axes[2].imshow(image, cmap='bone')
         axes[2].imshow(mask, alpha=0.3,cmap='Reds')
         axes[2].set_title('Image + mask')
         
-        # Create the plot for original image +mask+ mask bounding box
-        cv2.rectangle(image, (cmin,rmin),(cmax,rmax), (255,255,0), 5)
         axes[3].imshow(image)
         axes[3].imshow(mask,alpha=0.3,cmap='Reds')
         axes[3].set_title('Image + Mask + Bounding Box')
-        
-        # Finally, show image
         plt.show()
-        
         
 number_of_images_to_plot = 7
 
@@ -341,17 +349,6 @@ plot_imgs(
     uids_list=partial_ill_uids_list, 
     images_df=train_images_df, 
     rle_encodings_df=train_rle_encodings_df)
-
-
-        
-
-
-
-
-
-
-        
-
 
 
 
