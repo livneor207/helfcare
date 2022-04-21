@@ -86,7 +86,8 @@ train_metadata = [pydicom.dcmread(file_name) for file_name in train_file_names]
 
 # train_images = [dcm_file.pixel_array for dcm_file in DCM_files]
 # train_bla = [dcm_file.SOPInstanceUID for dcm_file in DCM_files]
-
+train_data_list =  [[cv2.cvtColor(dcm_file.pixel_array, cv2.COLOR_GRAY2RGB)] for dcm_file in DCM_files]
+#list(map(lambda x: cv2.imwrite('', x), train_data_list))
 train_data_list =  [[dcm_file.SOPInstanceUID, cv2.cvtColor(dcm_file.pixel_array, cv2.COLOR_GRAY2RGB)] for dcm_file in DCM_files]
  
 # temp = [{'UID': pydicom.read_file(file_name).SOPInstanceUID, 'Image': pydicom.read_file(file_name).pixel_array} 
