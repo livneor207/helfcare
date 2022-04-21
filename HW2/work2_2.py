@@ -57,64 +57,6 @@ import segmentation_models_pytorch as smp
 
 
 
-
-def get_mask_by_uid(rle_encodings_df, im_width, img_hieght , uid):
-    # create the mask 
-    # note: there can be more than one RLE encoding per image
-    #print(rle_encodings_df)
-    rle_encodings = rle_encodings_df[rle_encodings_df.ImageId == uid][' EncodedPixels']
-    if int(rle_encodings) == -1:
-        mask = np.zeros([1024, 1024])
-        return mask
-    final_mask = None
-    for rle_encoding in rle_encodings.to_list():
-        current_mask = rle2mask(rle=rle_encoding, width = im_width, height = img_hieght)
-        if final_mask is None:
-            final_mask = current_mask
-        else:
-            # print(f'another mask is added')
-            final_mask += current_mask  # Important logic
-
-    # mask needs to be rotated to fit the original image
-    
-    # todo seprate mask
-    final_mask[final_mask>0] = 255 # all diceese the same
-    mask = final_mask
-    mask = np.rot90(mask, 3) #rotating three times 90 to the right place
-    mask = np.flip(mask, axis=1)
-    
-    return mask
-
-def rle2mask(rle, width, height):
-    mask= np.zeros(width* height)
-    array = np.asarray([int(x) for x in rle.split()])
-    starts = array[0::2]
-    lengths = array[1::2]
-
-    current_position = 0
-    for index, start in enumerate(starts):
-        current_position += start
-        mask[current_position:current_position+lengths[index]] = 255
-        current_position += lengths[index]
-
-    return mask.reshape(width, height)
-
-
-
-def run_length_decode(rle, height=1024, width=1024, fill_value=1):
-    component = np.zeros((height, width), np.float32)
-    component = component.reshape(-1)
-    rle = np.array([int(s) for s in rle.strip().split(' ')])
-    rle = rle.reshape(-1, 2)
-    start = 0
-    for index, length in rle:
-        start = start+index
-        end = start+length
-        component[start: end] = fill_value
-        start = end
-    component = component.reshape(width, height).T
-    return component
-
 def run_length_encode(component):
     component = component.T.flatten()
     start = np.where(component[1:] > component[:-1])[0]+1
@@ -130,118 +72,6 @@ def run_length_encode(component):
     return rle
 
 
-class SIIMDataset(Dataset):
-    def __init__(self, df, fnames, data_folder, size, mean, std, phase):
-        self.df = df
-        self.root = data_folder
-        self.size = size
-        self.mean = mean
-        self.std = std
-        self.phase = phase
-        self.transforms = get_transforms(phase, size, mean, std)
-        self.gb = self.df.groupby('ImageId')
-        self.fnames = fnames
-
-    def __getitem__(self, idx):
-        image_id = self.fnames[idx]
-        df = self.gb.get_group(image_id)
-        annotations = df[' EncodedPixels'].tolist()
-        image_path = os.path.join(self.root, image_id + ".png")
-        image = cv2.imread(image_path)
-        # mask = np.zeros([1024, 1024])
-        # if annotations[0] != ' -1':
-        #     for rle in annotations:
-        #         mask += run_length_decode(rle)
-        # mask = (mask >= 1).astype('float32') # for overlap cases
-        height, width = image.shape[0],image.shape[1]
-        #print('--------')
-        #print(self.df)
-        
-        mask = get_mask_by_uid(self.df, width, height, self.fnames[idx])
-     
-        augmented = self.transforms(image=image, mask=mask)
-        image = augmented['image']
-        mask = augmented['mask']
-        return image, mask
-
-    def __len__(self):
-        return len(self.fnames)
-
-
-def get_transforms(phase, size, mean, std):
-    list_transforms = []
-    if phase == "train":
-        list_transforms.extend(
-            [
-#                 HorizontalFlip(),
-                ShiftScaleRotate(
-                    shift_limit=0,  # no resizing
-                    scale_limit=0.1,
-                    rotate_limit=10, # rotate
-                    p=0.5,
-                    border_mode=cv2.BORDER_CONSTANT
-                ),
-#                 GaussNoise(),
-            ]
-        )
-    list_transforms.extend(
-        [
-            Resize(size, size),
-            Normalize(mean=mean, std=std, p=1),
-            ToTensorV2(),
-        ]
-    )
-
-    list_trfms = Compose(list_transforms)
-    return list_trfms
-
-def provider(
-    fold,
-    total_folds,
-    data_folder,
-    df_path,
-    phase,
-    size,
-    mean=None,
-    std=None,
-    batch_size=8,
-    num_workers=4,
-):
-    df_all = pd.read_csv(df_path)
-    #df_all = df_all[0:100]
-    df = df_all.drop_duplicates('ImageId')
-    df_with_mask = df[df[" EncodedPixels"] != "-1"]
-    df_with_mask['has_mask'] = 1
-    df_without_mask = df[df[" EncodedPixels"] == "-1"]
-    df_without_mask['has_mask'] = 0
-    if df_without_mask.shape[0] > len(df_with_mask):
-        df_without_mask_sampled = df_without_mask.sample(len(df_with_mask), random_state=69) # random state is imp
-    else:
-        df_without_mask_sampled = df_without_mask
-    df = pd.concat([df_with_mask, df_without_mask_sampled])
-    
-    #NOTE: equal number of positive and negative cases are chosen.
-    
-    kfold = StratifiedKFold(total_folds, shuffle=True, random_state=69)
-    train_idx, val_idx = list(kfold.split(df["ImageId"], df["has_mask"]))[fold]
-    train_df, val_df = df.iloc[train_idx], df.iloc[val_idx]
-    df = train_df if phase == "train" else val_df
-    # NOTE: total_folds=5 -> train/val : 80%/20%
-    
-    fnames = df['ImageId'].values
-    
-    image_dataset = SIIMDataset(df_all, fnames, data_folder, size, mean, std, phase)
-
-    dataloader = DataLoader(
-        image_dataset,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        pin_memory=True,
-        shuffle=True,
-    )
-    return dataloader
-
-       
 def dice_loss(input, target):
     input = torch.sigmoid(input)
     smooth = 1.0
@@ -278,12 +108,12 @@ class MixedLoss(nn.Module):
         loss = self.alpha*self.focal(input, target) - torch.log(dice_loss(input, target))
         return loss.mean()
     
-    
-    
+
 def predict(X, threshold):
     X_p = np.copy(X)
     preds = (X_p > threshold).astype('uint8')
     return preds
+
 
 def metric(probability, truth, threshold=0.5, reduction='none'):
     '''Calculates dice of positive and negative images seperately'''
@@ -318,6 +148,7 @@ def metric(probability, truth, threshold=0.5, reduction='none'):
 
     return dice, dice_neg, dice_pos, num_neg, num_pos
 
+
 class Meter:
     '''A meter to keep track of iou and dice scores throughout an epoch'''
     def __init__(self, phase, epoch):
@@ -345,12 +176,14 @@ class Meter:
         iou = np.nanmean(self.iou_scores)
         return dices, iou
 
+
 def epoch_log(phase, epoch, epoch_loss, meter, start):
     '''logging the metrics at the end of an epoch'''
     dices, iou = meter.get_metrics()
     dice, dice_neg, dice_pos = dices
     print("Loss: %0.4f | dice: %0.4f | dice_neg: %0.4f | dice_pos: %0.4f | IoU: %0.4f" % (epoch_loss, dice, dice_neg, dice_pos, iou))
     return dice, iou
+
 
 def compute_ious(pred, label, classes, ignore_index=255, only_present=True):
     '''computes iou for one ground truth mask and predicted mask'''
@@ -380,7 +213,6 @@ def compute_iou_batch(outputs, labels, classes=None):
     return iou
 
 
-
 class Trainer(object):
     '''This class takes care of training and validation of our model'''
     def __init__(self, model):
@@ -393,14 +225,27 @@ class Trainer(object):
         self.num_epochs = 40
         self.best_loss = float("inf")
         self.phases = ["train", "val"]
-        self.device = torch.device("cuda:0")
-        torch.set_default_tensor_type("torch.cuda.FloatTensor")
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        print(f'self.device: {self.device}')
+        if 'cuda' == self.device:
+            torch.set_default_tensor_type("torch.cuda.FloatTensor")
         self.net = model
         self.criterion = MixedLoss(10.0, 2.0)
         self.optimizer = optim.Adam(self.net.parameters(), lr=self.lr)
         self.scheduler = ReduceLROnPlateau(self.optimizer, mode="min", patience=3, verbose=True)
         self.net = self.net.to(self.device)
         cudnn.benchmark = True
+
+        user = 'or'
+        if user == 'or':
+            train_rle_path = r"C:\MSC\HC\HW2\siim\train-rle.csv"
+            data_folder = r"C:\MSC\HC\HW2\input\train_png"
+            test_data_folder = r"C:\MSC\HC\HW2\input\test_png"
+        else:
+            train_rle_path = '/Users/royrubin/Downloads/siim/train-rle.csv'
+            data_folder = "/Users/royrubin/Downloads/archive_1/input/train_png"
+            test_data_folder = "/Users/royrubin/Downloads/archive_1/input/test_png"
+
         self.dataloaders = {
             phase: provider(
                 fold=1,
@@ -436,21 +281,25 @@ class Trainer(object):
         dataloader = self.dataloaders[phase]
         running_loss = 0.0
         total_batches = len(dataloader)
-#         tk0 = tqdm(dataloader, total=total_batches)
+        # tk0 = tqdm(dataloader, total=total_batches)
         self.optimizer.zero_grad()
         for itr, batch in enumerate(dataloader):
             images, targets = batch
+
+            images = torch.unsqueeze(input=images, dim=1)  #TODO: show or
+            targets = torch.unsqueeze(input=targets, dim=1)  #TODO: show or
+
             loss, outputs = self.forward(images, targets)
             loss = loss / self.accumulation_steps
             if phase == "train":
                 loss.backward()
-                if (itr + 1 ) % self.accumulation_steps == 0:
+                if (itr + 1) % self.accumulation_steps == 0:
                     self.optimizer.step()
                     self.optimizer.zero_grad()
             running_loss += loss.item()
             outputs = outputs.detach().cpu()
             meter.update(targets, outputs)
-#             tk0.set_postfix(loss=(running_loss / ((itr + 1))))
+        # tk0.set_postfix(loss=(running_loss / ((itr + 1))))
         epoch_loss = (running_loss * self.accumulation_steps) / total_batches
         dice, iou = epoch_log(phase, epoch, epoch_loss, meter, start)
         self.losses[phase].append(epoch_loss)
@@ -476,7 +325,6 @@ class Trainer(object):
                 torch.save(state, "./model.pth")
             print()
             
-            
 
 def plot(scores, name):
     plt.figure(figsize=(15,5))
@@ -486,8 +334,7 @@ def plot(scores, name):
     plt.legend(); 
     plt.show()
     
-    
-    
+
 class TestDataset(Dataset):
     def __init__(self, root, df, size, mean, std, tta=4):
         self.root = root
@@ -512,6 +359,7 @@ class TestDataset(Dataset):
     def __len__(self):
         return self.num_samples
 
+
 def post_process(probability, threshold, min_size):
     mask = cv2.threshold(probability, threshold, 1, cv2.THRESH_BINARY)[1]
     num_component, component = cv2.connectedComponents(mask.astype(np.uint8))
@@ -523,25 +371,258 @@ def post_process(probability, threshold, min_size):
             predictions[p] = 1
             num += 1
     return predictions, num
+
+
+def get_mask_by_uid(rle_encodings_df, im_width, img_hieght, uid):
+    # create the mask
+    # note: there can be more than one RLE encoding per image
+
+    try:
+        rle_encodings = rle_encodings_df[rle_encodings_df.ImageId == uid][' EncodedPixels']
+
+        final_mask = None
+
+        for rle_encoding in rle_encodings.to_list():
+            if rle_encoding == "-1" or rle_encoding == " -1":
+                empty_mask = np.zeros([1024, 1024])
+                return empty_mask
+
+            current_mask = rle2mask(rle=rle_encoding, width=im_width, height=img_hieght)
+            if final_mask is None:
+                final_mask = current_mask
+            else:
+                # print(f'another mask is added')
+                final_mask += current_mask  # Important logic
+
+        # mask needs to be rotated to fit the original image
+
+        # todo seprate mask
+        final_mask[final_mask > 0] = 255  # all diceese the same
+        mask = final_mask
+        mask = np.rot90(mask, 3)  # rotating three times 90 to the right place
+        mask = np.flip(mask, axis=1)
+    except Exception as e:
+        print(f'inside get_mask_by_uid: error: {type(e)}: {e}')
+        # TODO: show OR
+        empty_mask = np.zeros([1024, 1024])
+        return empty_mask
+
+    return mask
+
+
+def rle2mask(rle, width, height):
+    mask = np.zeros(width * height)
+    array = np.asarray([int(x) for x in rle.split()])
+    starts = array[0::2]
+    lengths = array[1::2]
+
+    current_position = 0
+    for index, start in enumerate(starts):
+        current_position += start
+        mask[current_position:current_position + lengths[index]] = 255
+        current_position += lengths[index]
+
+    return mask.reshape(width, height)
+
+
+def run_length_decode(rle, height=1024, width=1024, fill_value=1):
+    component = np.zeros((height, width), np.float32)
+    component = component.reshape(-1)
+    rle = np.array([int(s) for s in rle.strip().split(' ')])
+    rle = rle.reshape(-1, 2)
+    start = 0
+    for index, length in rle:
+        start = start + index
+        end = start + length
+        component[start: end] = fill_value
+        start = end
+    component = component.reshape(width, height).T
+    return component
+
+
+class SIIMDataset(Dataset):
+    def __init__(self, df, fnames, data_folder, size, mean, std, phase):
+        self.df = df
+        self.root = data_folder
+        self.size = size
+        self.mean = mean
+        self.std = std
+        self.phase = phase
+        self.transforms = get_transforms(phase, size, mean, std)
+        self.gb = self.df.groupby('ImageId')
+        self.fnames = fnames
+
+    def __getitem__(self, idx):
+        # print(f'retrieving item with index {idx}')
+
+        try:
+
+            image_id = self.fnames[idx]
+            # df = self.gb.get_group(image_id)
+            # annotations = df[' EncodedPixels'].tolist()
+            image_path = os.path.join(self.root, image_id + ".png")
+
+            from pathlib import Path
+
+            my_file = Path(image_path)
+            if not my_file.is_file():
+                print(f'problem with image in path: {image_path}')
+                # TODO: show OR
+                empty_image = np.zeros([1024, 1024])
+                empty_mask = np.zeros([1024, 1024])
+                empty_image = torch.from_numpy(empty_image)
+                empty_mask = torch.from_numpy(empty_mask)
+                return empty_image, empty_mask
+
+            image = cv2.imread(image_path)
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # TODO: show or
+
+            assert image.shape == (1024, 1024)  # converting to grey changed scale here from (1024,1024,3)
+
+            # mask = np.zeros([1024, 1024])
+            # if annotations[0] != ' -1':
+            #     for rle in annotations:
+            #         mask += run_length_decode(rle)
+            # mask = (mask >= 1).astype('float32') # for overlap cases
+
+            height, width = image.shape[0], image.shape[1]
+
+            mask = get_mask_by_uid(self.df, width, height, self.fnames[idx])
+
+            # concert to tensor instead of the augmentation
+            image = torch.from_numpy(image)
+            mask = torch.from_numpy(mask)
+
+            # # augmentation
+            # try:
+            #     augmented = self.transforms(image=image, mask=mask)
+            #     image = augmented['image']
+            #     mask = augmented['mask']
+            # except Exception as e:
+            #     print(f'inside __getitem__ idx {idx}. problem in augmentation, error: {type(e)}: {e}')
+            #     # TODO: show OR
+            #     empty_image = np.zeros([1024, 1024])
+            #     empty_mask = np.zeros([1024, 1024])
+            #     return empty_image, empty_mask
+
+        except Exception as e:
+            print(f'inside __getitem__ idx {idx}. general problem, error: {type(e)}: {e}')
+            # TODO: show OR
+            empty_image = np.zeros([1024, 1024])
+            empty_mask = np.zeros([1024, 1024])
+            empty_image = torch.from_numpy(empty_image)
+            empty_mask = torch.from_numpy(empty_mask)
+            return empty_image, empty_mask
+
+        # print(f'image.size() {image.shape}')
+        # print(f' mask.size() {mask.shape}')
+        assert image.shape == mask.shape
+        return image, mask
+
+    def __len__(self):
+        return len(self.fnames)
+
+
+def get_transforms(phase, size, mean, std):
+    list_transforms = []
+    # if phase == "train":
+    #     list_transforms.extend(
+    #         [
+    #             # HorizontalFlip(),
+    #             ShiftScaleRotate(
+    #                 shift_limit=0,  # no resizing
+    #                 scale_limit=0.1,
+    #                 rotate_limit=10, # rotate
+    #                 p=0.5,
+    #                 border_mode=cv2.BORDER_CONSTANT
+    #             ),
+    #             # GaussNoise(),
+    #         ]
+    #     )
+    list_transforms.extend(
+        [
+            # Resize(size, size),
+            # Normalize(mean=mean, std=std, p=1),  #TODO: show Or - need to be fixed
+            ToTensorV2(),
+        ]
+    )
+
+    list_trfms = Compose(list_transforms)
+    return list_trfms
+
+
+def provider(
+        fold,
+        total_folds,
+        data_folder,
+        df_path,
+        phase,
+        size,
+        mean=None,
+        std=None,
+        batch_size=8,
+        num_workers=4,
+):
+    df_all = pd.read_csv(df_path)
+    # df_all = df_all[0:100]
+    df = df_all.drop_duplicates('ImageId')
+    df_with_mask = df[df[" EncodedPixels"] != "-1"]
+    df_with_mask['has_mask'] = 1
+    df_without_mask = df[df[" EncodedPixels"] == "-1"]
+    df_without_mask['has_mask'] = 0
+    if df_without_mask.shape[0] > len(df_with_mask):
+        df_without_mask_sampled = df_without_mask.sample(len(df_with_mask), random_state=69)  # random state is imp
+    else:
+        df_without_mask_sampled = df_without_mask
+    df = pd.concat([df_with_mask, df_without_mask_sampled])
+
+    # NOTE: equal number of positive and negative cases are chosen.
+
+    kfold = StratifiedKFold(total_folds, shuffle=True, random_state=69)
+    train_idx, val_idx = list(kfold.split(df["ImageId"], df["has_mask"]))[fold]
+    train_df, val_df = df.iloc[train_idx], df.iloc[val_idx]
+    df = train_df if phase == "train" else val_df
+    # NOTE: total_folds=5 -> train/val : 80%/20%
+
+    fnames = df['ImageId'].values
+
+    image_dataset = SIIMDataset(df_all, fnames, data_folder, size, mean, std, phase)
+
+    dataloader = DataLoader(
+        image_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=True,
+        shuffle=True,
+    )
+    return dataloader
+
+
 def main():
     # sample_submission_path = '../input/siim-stage1/sample_submission.csv'
-    train_rle_path = r"C:\MSC\HC\HW2\siim\train-rle.csv"
-    data_folder = r"C:\MSC\HC\HW2\input\train_png"
-    test_data_folder = r"C:\MSC\HC\HW2\input\test_png"
+    user = 'or'
+    if user == 'or':
+        train_rle_path = r"C:\MSC\HC\HW2\siim\train-rle.csv"
+        data_folder = r"C:\MSC\HC\HW2\input\train_png"
+        test_data_folder = r"C:\MSC\HC\HW2\input\test_png"
+    else:
+        train_rle_path = '/Users/royrubin/Downloads/siim/train-rle.csv'
+        data_folder = "/Users/royrubin/Downloads/archive_1/input/train_png"
+        test_data_folder = "/Users/royrubin/Downloads/archive_1/input/test_png"
 
     # train_images_df
     # train_rle_encodings_df
 
     dataloader = provider(
         fold=0,
-        total_folds=5,
+        total_folds=2,  # was 5
         data_folder=data_folder,
         df_path=train_rle_path,
         phase="train",
-        size=512,
-        mean=(0.485, 0.456, 0.406),
-        std=(0.229, 0.224, 0.225),
-        batch_size=16,
+        size=1024,  # was 512
+        mean=(0.485, 0.456),  # was (0.485, 0.456, 0.406)
+        std=(0.229, 0.224),  # was (0.229, 0.224, 0.225)
+        batch_size=5,  # was 16
         num_workers=1,
     )
 
@@ -549,16 +630,21 @@ def main():
     images, masks = batch
 
     # plot some random images in the `batch`
-    idx = random.choice(range(16))
-    plt.imshow(images[idx][0], cmap='bone')
-    plt.imshow(masks[idx][0], alpha=0.2, cmap='Reds')
+    # idx = random.choice(range(16))
+    idx = 0
+
+    temp_img_to_plot = images[idx]
+    assert temp_img_to_plot.size() == (1024, 1024)
+    temp_mask_to_plot = masks[idx]
+    assert temp_mask_to_plot.size() == (1024, 1024)
+
+    plt.imshow(temp_img_to_plot, cmap='bone')
+    plt.imshow(temp_mask_to_plot, alpha=0.2, cmap='Reds')
     plt.show()
     if len(np.unique(masks[idx][0])) == 1:  # only zeros
         print('Chosen image has no ground truth mask, rerun the cell')
 
     model = smp.Unet("resnet34", encoder_weights="imagenet", activation=None)
-
-    model  # a *deeper* look
 
     model_trainer = Trainer(model)
     model_trainer.start()
@@ -576,11 +662,6 @@ def main():
 if __name__ == '__main__':
     main()
 
-
-
-
-
-    
 # size = 512
 # mean = (0.485, 0.456, 0.406)
 # std = (0.229, 0.224, 0.225)
