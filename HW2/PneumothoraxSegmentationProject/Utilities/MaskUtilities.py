@@ -1,4 +1,7 @@
 import numpy as np
+import torch
+
+from HW2.PneumothoraxSegmentationProject import WANTED_IMAGE_SIZE
 
 
 def rle2mask(rle, width, height):
@@ -21,20 +24,11 @@ def get_mask_from_rle_encodings(rle_encodings, img_width, img_height):
     # note: there can be more than one RLE encoding per image
 
     if isinstance(rle_encodings, str):
-        pass
-        # if rle_encodings == "-1" or rle_encodings == " -1":
-        #     empty_mask = np.zeros([1024, 1024])
-        #     return empty_mask
-        # else:
-        #     mask = rle2mask(rle=rle_encodings, width=img_width, height=img_height)
-        #     # mask needs to be rotated to fit the original image
-        #     mask = np.rot90(mask, 3)  # rotating three times 90 to the right place
-        #     mask = np.flip(mask, axis=1)
-        #     return mask
+        print(f'this is a problem ....')
 
     elif isinstance(rle_encodings, list):
         if rle_encodings == ["-1"] or rle_encodings == [" -1"]:
-            empty_mask = np.zeros([1024, 1024])
+            empty_mask = np.zeros([WANTED_IMAGE_SIZE, WANTED_IMAGE_SIZE])
             return empty_mask
         final_mask = None
         for rle_encoding in rle_encodings:
@@ -46,7 +40,7 @@ def get_mask_from_rle_encodings(rle_encodings, img_width, img_height):
                 # print(f'another mask is added')
                 final_mask += current_mask  # Important logic
 
-        final_mask[final_mask > 0] = 255  # all diceese the same
+        final_mask[final_mask > 0] = 255
         mask = final_mask
         # mask needs to be rotated to fit the original image
         mask = np.rot90(mask, 3)  # rotating three times 90 to the right place
@@ -54,7 +48,7 @@ def get_mask_from_rle_encodings(rle_encodings, img_width, img_height):
         return mask
     else:
         print(f'unexpected input')
-        empty_mask = np.zeros([1024, 1024])
+        empty_mask = np.zeros([WANTED_IMAGE_SIZE, WANTED_IMAGE_SIZE])
         return empty_mask
 
 

@@ -8,7 +8,7 @@ from HW2.PneumothoraxSegmentationProject.Utilities.PlotUtilities import plot_ima
 
 class TestUNet(unittest.TestCase):
     def test_prediction(self):
-        image = torch.rand((30, 1, 1024, 1024))  # single greyscale image
+        image = torch.rand((2, 1, 572, 572))  # single greyscale image
         model = UNet()
         res = model(image)
         print(res.size())

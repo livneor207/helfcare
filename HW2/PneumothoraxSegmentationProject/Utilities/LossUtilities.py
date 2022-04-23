@@ -62,3 +62,4 @@ class MixedLoss(nn.Module):
     def forward(self, input, target):
         loss = self.alpha*self.focal(input, target) - torch.log(dice_loss(input, target))
         return loss.mean()
+

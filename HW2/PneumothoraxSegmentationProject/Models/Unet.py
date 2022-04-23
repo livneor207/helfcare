@@ -44,7 +44,8 @@ class UNet(nn.Module):
         self._data_for_concatanation = None
 
     def encode(self, X: torch.Tensor) -> torch.Tensor:
-        print(f'Entered `encode`')
+        # print(f'Entered `encode`')
+
         x1 = self._double_convolution_1(X)
         x1_pool = self._max_pool_2x2(x1)           # move down 1
         x2 = self._double_convolution_2(x1_pool)
@@ -70,7 +71,7 @@ class UNet(nn.Module):
         return result
 
     def decode(self, X: torch.Tensor) -> torch.Tensor:
-        print(f'Entered `decode`')
+        # print(f'Entered `decode`')
 
         ### STEP 1 ###
         move_up_1 = self._up_convolution_1(X)

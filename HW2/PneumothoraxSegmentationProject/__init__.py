@@ -18,3 +18,4 @@ TEST_FILES_PATH = os.path.join(FOLDER_PATH, 'dicom-images-test/')
 
 
 FAST_LOAD_MODE = True
+WANTED_IMAGE_SIZE = 572

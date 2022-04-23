@@ -1,11 +1,18 @@
 from glob import glob
-
+import cv2
+import albumentations
 import numpy as np
 import pandas as pd
 import pydicom
+import torch
+from PIL import Image
+from albumentations import Resize
+from matplotlib import pyplot as plt
 from torch.utils.data import Dataset
+import torchvision.transforms as T
+from torchvision.transforms import InterpolationMode
 
-from HW2.PneumothoraxSegmentationProject import FAST_LOAD_MODE
+from HW2.PneumothoraxSegmentationProject import FAST_LOAD_MODE, WANTED_IMAGE_SIZE
 from HW2.PneumothoraxSegmentationProject.Utilities.MaskUtilities import get_mask_from_rle_encodings
 
 
@@ -71,24 +78,82 @@ class SIIMDataset(Dataset):
             patient["PixelSpacing"] = data.PixelSpacing
             patient["SamplesPerPixel"] = data.SamplesPerPixel
             patient["PixelSpacing"] = data.PixelSpacing
-            patient["Image"] = data.pixel_array
-            image_width, image_height = patient["Image"].shape
+            patient["OriginalImage"] = data.pixel_array
 
             # add a label to the data - if the patient has the disease or not
             try:
                 matching_records = rle_encodings_df[rle_encodings_df["UID"] == patient["UID"]]
                 rle_encodings = matching_records['EncodedPixels'].to_list()
                 patient["Label"] = 'Healthy' if rle_encodings == ['-1'] else 'Pneumothorax'
-                patient["Mask"] = get_mask_from_rle_encodings(rle_encodings=rle_encodings,
-                                                              img_width=image_width,
-                                                              img_height=image_height)
+                patient["OriginalMask"] = get_mask_from_rle_encodings(
+                    rle_encodings=rle_encodings,
+                    img_width=patient["OriginalImage"].shape[1],
+                    img_height=patient["OriginalImage"].shape[0])
                 patient["NumOfEncodings"] = 0 if rle_encodings == ['-1'] else len(rle_encodings)
+
+                # plt.imshow(patient['OriginalMask'], cmap='gray')
+
+
             except:
                 patient["Label"] = 'NoLabel'
-                patient["Mask"] = np.zeros([image_width, image_height])
+                patient["OriginalMask"] = np.zeros([WANTED_IMAGE_SIZE, WANTED_IMAGE_SIZE])
                 patient["NumOfEncodings"] = 0
 
+            # Resize image
+            try:
+                # to fit the baseline model we need the image size to be smaller.
+                # since we are doing segmentation, we need to resize the image and the mask together
+
+                # # albumentations will help with that.
+                # transform = albumentations.Compose([
+                #     Resize(height=WANTED_IMAGE_SIZE,
+                #            width=WANTED_IMAGE_SIZE,
+                #            interpolation=cv2.INTER_LANCZOS4)  # please see interpolation method !!!
+                # ])
+                # transformed = transform(image=patient["OriginalImage"], mask=patient["OriginalMask"])
+                # patient["Image"] = transformed['image']
+                # patient["Mask"] = transformed['mask']
+
+                # transform for square resize
+                # transform = T.ToPILImage()
+                # transform = T.Resize((WANTED_IMAGE_SIZE, WANTED_IMAGE_SIZE))
+
+                transform = T.Compose([
+                    T.Resize(WANTED_IMAGE_SIZE, interpolation=InterpolationMode.NEAREST),
+                    T.PILToTensor(),
+                    T.ConvertImageDtype(torch.float),
+                ])
+
+                # convert to tensors
+                # patient["OriginalImage"] = torch.from_numpy(patient["OriginalImage"])
+                # patient["OriginalMask"] = torch.from_numpy(patient["OriginalMask"])
+
+                # convert images to PIL format so that they can be transformed using torchbvision
+                patient["OriginalImage"] = Image.fromarray(patient["OriginalImage"])
+                patient["OriginalMask"] = Image.fromarray(patient["OriginalMask"])
+
+                # transform
+                patient["Image"] = transform(patient["OriginalImage"])
+                patient["Mask"] = transform(patient["OriginalMask"])
+
+                # plt.figure()
+                # plt.imshow(patient['OriginalMask'], cmap='gray')
+                # plt.imshow(torch.squeeze(patient['Mask'], dim=0).numpy(), cmap='gray')
+                # plt.show()
+                # # plt.figure()
+                # # plt.imshow(torch.squeeze(patient['Image'], dim=0).numpy(), cmap='gray')
+                # # plt.show()
+
+
+            except Exception as e:
+                print(f'problem with image resize ! ', patient['UID'], f'problem was {type(e), e}')
+                patient["OriginalImage"] = np.zeros([WANTED_IMAGE_SIZE, WANTED_IMAGE_SIZE])
+                patient["Mask"] = np.zeros([WANTED_IMAGE_SIZE, WANTED_IMAGE_SIZE])
+                raise e  # could not process
+
             # finally
+            patient.pop("OriginalImage", None)  # not needed anymore
+            patient.pop("OriginalMask", None)  # not needed anymore
             patients = patients.append(patient, ignore_index=True)
 
         # return the dataframe as output

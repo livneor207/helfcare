@@ -1,6 +1,11 @@
 from torch.utils.data import DataLoader
 import numpy as np
 import torch
+from torchvision.transforms import InterpolationMode
+import torchvision.transforms as T
+from HW2.PneumothoraxSegmentationProject import WANTED_IMAGE_SIZE
+import matplotlib.pyplot as plt
+
 
 class Trainer(object):
     def __init__(self, dataset, model, loss_function, optimizer, hyperparams):
@@ -34,7 +39,7 @@ class Trainer(object):
         loss_value_averages_of_all_epochs = []
 
         for iteration in range(self._hyperparams['num_of_epochs']):
-            print(f'iteration {iteration + 1} ')  # TODO: comment this line if  working on notebook
+            print(f'iteration {iteration + 1} ')
 
             # init variables for external loop
             dl_iter = iter(self._dataloader)  # iterator over the dataloader. called only once, outside of the loop, and from then on we use next() on that iterator
@@ -56,13 +61,8 @@ class Trainer(object):
                 * data['Mask'] is a tensor shaped (30,1024,1024)
                 '''
 
-                x = data['Image']  # TODO NOTE: change according to new DS
-                y = data['Mask']  # TODO NOTE: change according to new DS
-
-                # change tensor types to fit model:
-                # (30,1024,1024) -> (30,1,1024,1024)  # meaning we added the channels dim
-                x = torch.unsqueeze(input=x, dim=1)
-                y = torch.unsqueeze(input=y, dim=1)
+                x = data['Image']
+                y = data['Mask']
 
                 # load to device
                 if self._hyperparams['device'].type == 'cuda':
@@ -70,13 +70,22 @@ class Trainer(object):
                     y = y.to(device=self._hyperparams['device'])
 
                 # Forward pass: compute predicted y by passing x to the model.
-                y_pred = self._model(x)
+                result = self._model(x)
 
-                # # load to device
-                # y_pred = y_pred.squeeze()  # NOTE !!!!!!! probably needed for the single gene prediction later on
+                # resize output mask to match size of prediction
+                if (result.shape[-2] != y.shape[-2]) and (result.shape[-1] != y.shape[-1]):
+                    transform = T.Compose([
+                        T.Resize(WANTED_IMAGE_SIZE, interpolation=InterpolationMode.NEAREST),
+                        T.ConvertImageDtype(torch.float),
+                    ])
+                    result = transform(result)
+
+                # extract the prediction mask
+                y_pred = result[:,1,:,:]  # TODO: not sure which channel is needed - 0 or 1. i'll take 1 for now
+                y_true = y[:,0,:,:]  # only one channel here
 
                 # Compute (and save) loss.
-                loss = self._loss_function(y_pred, y)
+                loss = self._loss_function(y_pred, y_true)
                 loss_values_list.append(loss.item())
 
                 # Before the backward pass, use the optimizer object to zero all of the gradients for the variables it will update (which are the learnable
@@ -97,10 +106,9 @@ class Trainer(object):
             # print(f'\nfinished inner loop.')
 
             # data prints on the epoch that ended
-            # print(f'in this epoch: min loss {np.min(loss_values_list)} max loss {np.max(loss_values_list)}')
-            # print(f'               average loss {np.mean(loss_values_list)}')
+            print(f'in this epoch: min loss {np.min(loss_values_list)} max loss {np.max(loss_values_list)}')
             average_value_this_epoch = np.mean(loss_values_list)
-            # print(f'in this epoch: average loss {average_value_this_epoch}')
+            print(f'in this epoch: average loss {average_value_this_epoch}')
             loss_value_averages_of_all_epochs.append(average_value_this_epoch)
 
         print(f'finished all epochs !                                         ')  # spaces ARE intended
@@ -120,3 +128,4 @@ class Trainer(object):
             # make sure there are no leftover datapoints not used because of "//"" calculation above
             if (len(self._dataset) % self._dataloader.batch_size) != 0:
                 self._num_of_batches = self._num_of_batches + 1
+
